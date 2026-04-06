@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"strings"
+	"sync"
 
 	"parallel-text-analyzer/internal/model"
 )
@@ -35,4 +36,20 @@ func ProcessFile(path string) (model.FileStats, error) {
 		Lines:    lines,
 		Chars:    chars,
 	}, nil
+}
+
+func StartWorkers(filePaths <-chan string, results chan<- model.FileStats, wg *sync.WaitGroup, numWorkers int) {
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range filePaths {
+				stats, err := ProcessFile(path)
+				if err != nil {
+					continue
+				}
+				results <- stats
+			}
+		}()
+	}
 }
