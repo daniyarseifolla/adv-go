@@ -5,4 +5,10 @@ type FileStats struct {
 	Words    int
 	Lines    int
 	Chars    int
+	WordFreq map[string]int
+}
+
+type WordCount struct {
+	Word  string
+	Count int
 }
