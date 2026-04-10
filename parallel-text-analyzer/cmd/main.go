@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"parallel-text-analyzer/internal/aggregator"
+	"parallel-text-analyzer/internal/analyzer"
 	"parallel-text-analyzer/internal/model"
 	"parallel-text-analyzer/internal/pipeline"
 )
@@ -35,11 +36,22 @@ func main() {
 		return
 	}
 
+	n := *topWords
+	if n == 0 {
+		n = 5
+	}
+
+	analyzers := []analyzer.Analyzer{
+		&analyzer.WordCountAnalyzer{},
+		&analyzer.LineCountAnalyzer{},
+		&analyzer.MostFrequentWordsAnalyzer{TopN: n},
+	}
+
 	filePaths := make(chan string, len(files))
 	results := make(chan model.FileStats, len(files))
 
 	var wg sync.WaitGroup
-	pipeline.StartWorkers(ctx, filePaths, results, &wg, *workers)
+	pipeline.StartWorkers(ctx, filePaths, results, &wg, *workers, analyzers)
 
 	for _, f := range files {
 		filePaths <- f
@@ -55,13 +67,32 @@ func main() {
 
 	for stats := range results {
 		fmt.Printf("File: %s\n", stats.FileName)
-		fmt.Printf("  Lines: %d  Words: %d  Chars: %d\n\n", stats.Lines, stats.Words, stats.Chars)
+		for _, r := range stats.Results {
+			switch r.Name {
+			case "WordCount":
+				fmt.Printf("  [%s] Words: %v\n", r.Name, r.Data["words"])
+			case "LineCount":
+				fmt.Printf("  [%s] Lines: %v\n", r.Name, r.Data["lines"])
+			case "FreqWords":
+				if top, ok := r.Data["top_words"].([]model.WordCount); ok {
+					fmt.Printf("  [%s] Top: ", r.Name)
+					for i, wc := range top {
+						if i > 0 {
+							fmt.Print(", ")
+						}
+						fmt.Printf("%s(%d)", wc.Word, wc.Count)
+					}
+					fmt.Println()
+				}
+			}
+		}
+		fmt.Println()
 		agg.Merge(stats)
 	}
 
 	if *topWords > 0 {
 		top := agg.TopWords(*topWords)
-		fmt.Printf("Top %d words:\n", len(top))
+		fmt.Printf("Top %d words (all files):\n", len(top))
 		for i, wc := range top {
 			fmt.Printf("  %d. %-15s — %d\n", i+1, wc.Word, wc.Count)
 		}
