@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func WalkDir(root, ext string) ([]string, error) {
+func WalkDir(root, ext string, minSize, maxSize int64) ([]string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, err
@@ -25,9 +25,24 @@ func WalkDir(root, ext string) ([]string, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), ext) {
-			files = append(files, path)
+		if !strings.HasSuffix(d.Name(), ext) {
+			return nil
 		}
+
+		if minSize > 0 || maxSize > 0 {
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			if minSize > 0 && info.Size() < minSize {
+				return nil
+			}
+			if maxSize > 0 && info.Size() > maxSize {
+				return nil
+			}
+		}
+
+		files = append(files, path)
 		return nil
 	})
 

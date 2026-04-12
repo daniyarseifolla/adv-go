@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/signal"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"syscall"
 
@@ -21,12 +23,26 @@ func main() {
 	ext := flag.String("ext", ".txt", "file extension to analyze")
 	workers := flag.Int("workers", runtime.NumCPU(), "number of worker goroutines")
 	topWords := flag.Int("top-words", 0, "show top N most frequent words")
+	minSize := flag.Int64("min-size", 0, "minimum file size in bytes")
+	maxSize := flag.Int64("max-size", 0, "maximum file size in bytes")
+	cpuProfile := flag.String("cpuprofile", "", "write cpu profile to file")
+	memProfile := flag.String("memprofile", "", "write memory profile to file")
 	flag.Parse()
+
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			log.Fatalf("could not create cpu profile: %v", err)
+		}
+		defer f.Close()
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	files, err := pipeline.WalkDir(*path, *ext)
+	files, err := pipeline.WalkDir(*path, *ext, *minSize, *maxSize)
 	if err != nil {
 		log.Fatalf("error walking path: %v", err)
 	}
@@ -96,5 +112,15 @@ func main() {
 		for i, wc := range top {
 			fmt.Printf("  %d. %-15s — %d\n", i+1, wc.Word, wc.Count)
 		}
+	}
+
+	if *memProfile != "" {
+		f, err := os.Create(*memProfile)
+		if err != nil {
+			log.Fatalf("could not create memory profile: %v", err)
+		}
+		defer f.Close()
+		runtime.GC()
+		pprof.WriteHeapProfile(f)
 	}
 }
