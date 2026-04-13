@@ -5,12 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 	"os/signal"
 	"runtime"
-	"runtime/pprof"
 	"sync"
 	"syscall"
+	"time"
 
 	"parallel-text-analyzer/internal/aggregator"
 	"parallel-text-analyzer/internal/analyzer"
@@ -25,19 +24,12 @@ func main() {
 	topWords := flag.Int("top-words", 0, "show top N most frequent words")
 	minSize := flag.Int64("min-size", 0, "minimum file size in bytes")
 	maxSize := flag.Int64("max-size", 0, "maximum file size in bytes")
-	cpuProfile := flag.String("cpuprofile", "", "write cpu profile to file")
-	memProfile := flag.String("memprofile", "", "write memory profile to file")
+	cpuProf := flag.String("cpuprofile", "", "write cpu profile to file")
+	memProf := flag.String("memprofile", "", "write memory profile to file")
 	flag.Parse()
 
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
-		if err != nil {
-			log.Fatalf("could not create cpu profile: %v", err)
-		}
-		defer f.Close()
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
+	stopProfile := startCPUProfile(*cpuProf)
+	defer stopProfile()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -63,6 +55,9 @@ func main() {
 		&analyzer.MostFrequentWordsAnalyzer{TopN: n},
 	}
 
+	fmt.Printf("Starting analysis: %d files, %d workers\n\n", len(files), *workers)
+	start := time.Now()
+
 	filePaths := make(chan string, len(files))
 	results := make(chan model.FileStats, len(files))
 
@@ -82,45 +77,15 @@ func main() {
 	agg := aggregator.New()
 
 	for stats := range results {
-		fmt.Printf("File: %s\n", stats.FileName)
-		for _, r := range stats.Results {
-			switch r.Name {
-			case "WordCount":
-				fmt.Printf("  [%s] Words: %v\n", r.Name, r.Data["words"])
-			case "LineCount":
-				fmt.Printf("  [%s] Lines: %v\n", r.Name, r.Data["lines"])
-			case "FreqWords":
-				if top, ok := r.Data["top_words"].([]model.WordCount); ok {
-					fmt.Printf("  [%s] Top: ", r.Name)
-					for i, wc := range top {
-						if i > 0 {
-							fmt.Print(", ")
-						}
-						fmt.Printf("%s(%d)", wc.Word, wc.Count)
-					}
-					fmt.Println()
-				}
-			}
-		}
-		fmt.Println()
+		printFileStats(stats)
 		agg.Merge(stats)
 	}
 
 	if *topWords > 0 {
-		top := agg.TopWords(*topWords)
-		fmt.Printf("Top %d words (all files):\n", len(top))
-		for i, wc := range top {
-			fmt.Printf("  %d. %-15s — %d\n", i+1, wc.Word, wc.Count)
-		}
+		printTopWords(agg.TopWords(*topWords))
 	}
 
-	if *memProfile != "" {
-		f, err := os.Create(*memProfile)
-		if err != nil {
-			log.Fatalf("could not create memory profile: %v", err)
-		}
-		defer f.Close()
-		runtime.GC()
-		pprof.WriteHeapProfile(f)
-	}
+	fmt.Printf("\nDone in %s\n", time.Since(start))
+
+	writeMemProfile(*memProf)
 }
